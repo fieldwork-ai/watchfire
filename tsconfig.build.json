@@ -1,4 +1,7 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts"]
+  // Tests and their fixtures are excluded from the published build. The
+  // fixtures are large generated artifacts (captured engine stacks, a real
+  // bundler source map) that only the test suite imports.
+  "exclude": ["src/**/*.test.ts", "src/stack/fixtures.ts", "src/sourcemaps/map-fixture.ts"]
 }
