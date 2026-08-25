@@ -58,9 +58,66 @@ Capture is tiered, and the defaults are the safe end of each tier:
 
 Hosts that want richer capture turn the dials up in one config object. The library ships the floor; your risk appetite sets the ceiling.
 
+## Setup
+
+Three changes. First, the build step:
+
+```json
+"build": "next build && watchfire maps"
+```
+
+with `productionBrowserSourceMaps: true` in `next.config.ts`. Second, a route:
+
+```ts
+// app/api/errors/route.ts
+import { createIngestHandler, filesystemStore, defaultMapsDir } from "watchfire/ingest";
+
+export const POST = createIngestHandler({
+  maps: filesystemStore(defaultMapsDir()),
+  onEvent: async (event) => {
+    // Yours. A row, a log line, a Slack post.
+    await db.insertInto("client_errors").values({
+      fingerprint: event.fingerprint,
+      message: event.message,
+      frames: JSON.stringify(event.frames),
+    }).execute();
+  },
+});
+```
+
+Third, start the client:
+
+```ts
+import { init } from "watchfire/browser";
+
+init({ endpoint: "/api/errors", release: process.env.NEXT_PUBLIC_RELEASE });
+```
+
+That is the whole integration. To resolve errors from browsers still running an older release, pass a shared store instead and register each release on boot:
+
+```ts
+import { layeredStore, s3Store, filesystemStore, registerMaps, defaultMapsDir } from "watchfire/sourcemaps";
+
+const shared = s3Store({ bucket: "my-app-maps", client, commands });
+void registerMaps({ release, localDir: `${defaultMapsDir()}/${release}`, store: shared });
+```
+
+## Grouping
+
+Every event carries a `fingerprint`, so `GROUP BY fingerprint` is your issue list. Two properties it is built for, both enforced by tests:
+
+- **Stable across deploys.** The key is built from resolved original paths and lines, never generated chunk names, so a rebuild does not fragment an issue. Variable parts of the message (ids, numbers, quoted strings, URLs) are templated out, so `Failed to load user 8f3a...` and `Failed to load user 22bc...` are one issue.
+- **Stable across engines.** Only the top application frame feeds the key. Deep frames are framework internals, and the engines genuinely disagree about which of them exist: V8 reports a React handler frame that JSC elides. Including them would turn one bug into three issues.
+
+Repeat suppression happens in the browser: a hot loop sends at most three reports per signature per page load, and the suppressed count rides along on the next report so a storm still reads as a storm.
+
 ## Status
 
-Under active development; v0.0.1 on npm is a name-holding stub. The v0.1.0 milestone is: browser capture, ingest pipeline, source map build step and resolver, and an end-to-end test suite that runs real Chromium, WebKit, and Firefox against a fixture Next.js app. Watchfire's first production deployment will be [Fieldwork](https://getfieldwork.ai), where it is being built.
+v0.1.0. Browser capture, ingest pipeline, source map build step and resolver, all covered by 119 unit tests and 33 end-to-end tests run against real Chromium, WebKit and Firefox driving a Next 16 Turbopack build.
+
+Stack parser fixtures are captured from the engines themselves rather than written by hand, and the source map decoder is tested against real bundler output. Watchfire's first production deployment is [Fieldwork](https://getfieldwork.ai), where it is being built.
+
+Not built, deliberately: no hosted UI, no Sentry wire protocol compatibility. Both would make this a second service to run, which is the thing it exists to avoid.
 
 ## License
 
