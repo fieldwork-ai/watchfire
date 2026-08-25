@@ -1,0 +1,86 @@
+{
+  "name": "watchfire",
+  "version": "1.0.0",
+  "description": "Self-hosted error tracking for Next.js. A library, not a service.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fieldwork-ai/watchfire.git"
+  },
+  "homepage": "https://github.com/fieldwork-ai/watchfire",
+  "keywords": [
+    "error-tracking",
+    "source-maps",
+    "nextjs",
+    "monitoring",
+    "self-hosted"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "default": "./dist/browser/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
+    "./stack": {
+      "types": "./dist/stack/index.d.ts",
+      "default": "./dist/stack/index.js"
+    },
+    "./ingest": {
+      "types": "./dist/ingest/index.d.ts",
+      "default": "./dist/ingest/index.js"
+    },
+    "./sourcemaps": {
+      "types": "./dist/sourcemaps/index.d.ts",
+      "default": "./dist/sourcemaps/index.js"
+    }
+  },
+  "bin": {
+    "watchfire": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "lint": "tsc --noEmit",
+    "capture:stacks": "tsx e2e/capture-stacks.ts",
+    "capture:map": "tsx e2e/gen-map-fixture.mjs",
+    "e2e": "playwright test"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1117.0",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "packageManager": "pnpm@10.28.0"
+}
