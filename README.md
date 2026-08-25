@@ -2,6 +2,10 @@
 
 Self-hosted error tracking for Next.js. A library, not a service.
 
+[![CI](https://github.com/fieldwork-ai/watchfire/actions/workflows/ci.yml/badge.svg)](https://github.com/fieldwork-ai/watchfire/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/watchfire)](https://www.npmjs.com/package/watchfire)
+[![license](https://img.shields.io/npm/l/watchfire)](LICENSE)
+
 Watchfire captures JavaScript errors in your users' browsers, resolves the minified stack traces back to your original source using privately held source maps, gives each error a stable fingerprint for grouping, and hands the result to a callback in your code. Error data stays on your infrastructure, and there's no extra service to run.
 
 ```
