@@ -59,7 +59,7 @@ const nextConfig = { /* your config */ };
 export default withWatchfire(nextConfig);
 ```
 
-The wrapper enables source map generation and returns your release id as Next's build id, so maps are stored under the same name the browser reports. The release comes from `NEXT_PUBLIC_RELEASE` (pass `release` to override); without one, Next falls back to its own generated id, so local development needs no configuration. A `generateBuildId` you define yourself is never replaced.
+The wrapper enables source map generation and returns your release id as Next's build id, so maps are stored under the same name the browser reports. The release comes from `NEXT_PUBLIC_RELEASE` (pass `release` to override); without one, Next falls back to its own generated id, so local development needs no configuration. A `generateBuildId` you define yourself is respected and not overwritten.
 
 In `package.json`, run `watchfire maps` after the build:
 
