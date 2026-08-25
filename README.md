@@ -32,12 +32,13 @@ browser error ──POST──▶ /api/errors (a route in your app)
                         onEvent(event)   ← your code: a DB insert, a log line
 ```
 
-One package, five subpath exports and a CLI:
+One package, six subpath exports and a CLI:
 
 | Import | Contents |
 | --- | --- |
 | `watchfire/browser` | Client SDK: capture, breadcrumbs, batching, repeat suppression. 5 kB minified, 2.3 kB gzipped |
 | `watchfire/ingest` | The route handler, a standard `(Request) => Response` function |
+| `watchfire/next` | `withWatchfire`, wraps `next.config` to wire source maps and the release build id |
 | `watchfire/react` | `reportBoundaryError`, for error boundaries |
 | `watchfire/stack` | Stack parsing (Chrome, Safari, and Firefox formats) and fingerprinting |
 | `watchfire/sourcemaps` | Map stores, the runtime resolver, boot-time registration |
@@ -48,13 +49,17 @@ The build tooling targets Next.js; the runtime is framework-neutral.
 
 ### 1. The build
 
-In `next.config.ts`, enable source map generation:
+In `next.config.ts`, wrap your config:
 
 ```ts
-const nextConfig = {
-  productionBrowserSourceMaps: true,
-};
+import { withWatchfire } from "watchfire/next";
+
+const nextConfig = { /* your config */ };
+
+export default withWatchfire(nextConfig);
 ```
+
+The wrapper enables source map generation and returns your release id as Next's build id, so maps are stored under the same name the browser reports. The release comes from `NEXT_PUBLIC_RELEASE` (pass `release` to override); without one, Next falls back to its own generated id, so local development needs no configuration. A `generateBuildId` you define yourself is respected and not overwritten.
 
 In `package.json`, run `watchfire maps` after the build:
 
@@ -66,7 +71,7 @@ In `package.json`, run `watchfire maps` after the build:
 
 `next build` writes a `.map` file beside every chunk. `watchfire maps` moves the maps into a private directory inside the server output, removes the public pointers, and fails the build if any map remains publicly reachable. Maps are stored under a release id, which defaults to Next's build id.
 
-### 2. The route
+### 2. The server route
 
 Create `app/api/errors/route.ts`:
 
@@ -87,7 +92,7 @@ export const POST = createIngestHandler({
 
 `onEvent` receives the finished event: parsed, resolved to original source, fingerprinted.
 
-### 3. The client
+### 3. The browser
 
 Create `instrumentation-client.ts` at the project root. Next runs any file with that name in the browser before your app code starts, so nothing needs to import it:
 
@@ -97,14 +102,7 @@ import { init } from "watchfire/browser";
 init({ endpoint: "/api/errors", release: process.env.NEXT_PUBLIC_RELEASE });
 ```
 
-`release` must match the id the maps were stored under in step 1. A report with an unknown release is still delivered, but without resolved source positions. The simplest arrangement is one env var used in both places: return it from `generateBuildId` so it becomes the build id, and pass it to `init`:
-
-```ts
-// next.config.ts
-generateBuildId: () => process.env.NEXT_PUBLIC_RELEASE ?? null,
-```
-
-Returning `null` falls back to Next's generated id, so local development needs no configuration.
+`release` must match the id the maps were stored under in step 1. `withWatchfire` reads the same `NEXT_PUBLIC_RELEASE` variable, so setting one env var at build time covers both. A report with an unknown release is still delivered, but without resolved source positions.
 
 ## Source maps at runtime
 
@@ -145,7 +143,7 @@ Repeat suppression runs in the browser: at most three reports per distinct error
 
 ## Status
 
-v1.0.0. Covered by 141 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
+v1.1.2. Covered by 150 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
 
 Out of scope: a hosted UI and Sentry protocol compatibility, both of which would turn the library into a service.
 

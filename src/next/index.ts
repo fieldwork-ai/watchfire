@@ -16,12 +16,13 @@
 /**
  * The subset of Next config this wrapper touches, typed structurally so the
  * package needs no dependency on `next` itself. Pass a real `NextConfig`;
- * everything else on it flows through untouched.
+ * everything else on it flows through untouched. Deliberately NO index
+ * signature: a parameter type with one rejects interfaces such as
+ * `NextConfig`, which is exactly the argument every caller passes.
  */
 export interface WatchfireNextConfig {
   productionBrowserSourceMaps?: boolean;
   generateBuildId?: () => string | null | Promise<string | null>;
-  [key: string]: unknown;
 }
 
 export interface WithWatchfireOptions {
@@ -35,11 +36,17 @@ export interface WithWatchfireOptions {
   release?: string | null;
 }
 
-export function withWatchfire<C extends WatchfireNextConfig>(
+// Constrained on `object`, not on WatchfireNextConfig: an all-optional
+// interface is a "weak type", and TypeScript rejects any argument sharing no
+// properties with it (TS2559) — which is exactly an inline config literal
+// that sets neither of the two fields this wrapper owns. The interface is
+// still the contract; it is read through a cast internally.
+export function withWatchfire<C extends object>(
   config: C,
   options?: WithWatchfireOptions,
 ): C & Required<Pick<WatchfireNextConfig, "productionBrowserSourceMaps" | "generateBuildId">> {
   const release = options?.release ?? process.env.NEXT_PUBLIC_RELEASE ?? null;
+  const hostBuildId = (config as WatchfireNextConfig).generateBuildId;
 
   return {
     ...config,
@@ -48,6 +55,6 @@ export function withWatchfire<C extends WatchfireNextConfig>(
     // explicit choice is how two tools end up fighting over one field. Hosts
     // with their own build id should pass the same value to `init` themselves.
     generateBuildId:
-      config.generateBuildId ?? (() => (release !== null && release !== "" ? release : null)),
+      hostBuildId ?? (() => (release !== null && release !== "" ? release : null)),
   };
 }
