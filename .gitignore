@@ -7,3 +7,4 @@ e2e/fixture-next/node_modules/
 test-results/
 playwright-report/
 .watchfire/
+e2e/fixture-next/received.jsonl

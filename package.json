@@ -56,7 +56,8 @@
     "test:e2e": "playwright test",
     "lint": "tsc --noEmit",
     "capture:stacks": "tsx e2e/capture-stacks.ts",
-    "capture:map": "tsx e2e/gen-map-fixture.mjs"
+    "capture:map": "tsx e2e/gen-map-fixture.mjs",
+    "e2e": "playwright test"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",

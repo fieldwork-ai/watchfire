@@ -49,9 +49,9 @@ export interface InitOptions {
  * cannot be grouped or acted on. Extension errors are not the site's code.
  */
 const DEFAULT_IGNORE: RegExp[] = [
-  /^ResizeObserver loop/,
-  /^Script error\.?$/,
-  /^Non-Error promise rejection captured/,
+  /ResizeObserver loop/,
+  /(^|: )Script error\.?$/,
+  /Non-Error promise rejection captured/,
   /extensions?\//i,
   /^chrome-extension:\/\//,
   /^moz-extension:\/\//,

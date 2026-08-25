@@ -138,6 +138,9 @@ export function tidySourcePath(source: string): string {
   return source
     .replace(/^webpack:\/\/(?:_N_E)?\/?/, "")
     .replace(/^turbopack:\/\/(?:\[project\])?\/?/, "")
+    // Turbopack also emits a bare `[project]/` prefix with no protocol, which
+    // is what a real Next 16 build produces in `sources`.
+    .replace(/^\[project\]\/?/, "")
     .replace(/^(?:\.\.\/)+/, "")
     .replace(/^\.\//, "");
 }

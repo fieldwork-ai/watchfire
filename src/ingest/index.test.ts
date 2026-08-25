@@ -124,6 +124,42 @@ describe("createIngestHandler", () => {
       expect(events).toHaveLength(1);
     });
 
+    it("matches the Host header, not request.url", async () => {
+      // The regression that the e2e suite caught: a server behind a proxy (or
+      // Next standalone, which reports its bind address) sees an internal
+      // request.url, so comparing against it drops every genuine report.
+      const { events, handler } = harness();
+      const request = new Request("http://10.0.1.7:3000/api/errors", {
+        method: "POST",
+        headers: { origin: ORIGIN, host: "app.example" },
+        body: JSON.stringify({ v: WIRE_VERSION, reports: [report()] }),
+      });
+      await handler(request);
+      expect(events).toHaveLength(1);
+    });
+
+    it("prefers x-forwarded-host when a proxy sets it", async () => {
+      const { events, handler } = harness();
+      const request = new Request("http://10.0.1.7:3000/api/errors", {
+        method: "POST",
+        headers: { origin: ORIGIN, host: "internal.lb", "x-forwarded-host": "app.example" },
+        body: JSON.stringify({ v: WIRE_VERSION, reports: [report()] }),
+      });
+      await handler(request);
+      expect(events).toHaveLength(1);
+    });
+
+    it("still rejects a genuine cross-origin post behind a proxy", async () => {
+      const { events, handler } = harness();
+      const request = new Request("http://10.0.1.7:3000/api/errors", {
+        method: "POST",
+        headers: { origin: "https://evil.example", host: "app.example" },
+        body: JSON.stringify({ v: WIRE_VERSION, reports: [report()] }),
+      });
+      await handler(request);
+      expect(events).toEqual([]);
+    });
+
     it("honours a custom allowOrigin", async () => {
       const { events, handler } = harness({ allowOrigin: () => false });
       await handler(post([report()]));

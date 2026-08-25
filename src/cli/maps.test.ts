@@ -144,3 +144,96 @@ describe("runMaps", () => {
     expect(second.stripped).toBe(0);
   });
 });
+
+describe("map-to-chunk association", () => {
+  /**
+   * Turbopack does NOT name a map after its chunk: a real Next 16 build emits
+   * `3rf7vuwqjn2o9.js` pointing at `436du6w0scwwt.js.map`. Webpack's
+   * `<chunk>.js.map` convention holds only by accident, so the sourceMappingURL
+   * comment is the only authoritative link. Getting this wrong resolves nothing
+   * while looking exactly like "this release has no maps".
+   */
+  it("follows sourceMappingURL when the map name differs from the chunk", async () => {
+    const nextDir = join(root, ".next");
+    const chunks = join(nextDir, "static", "chunks");
+    await mkdir(chunks, { recursive: true });
+    await writeFile(join(nextDir, "BUILD_ID"), "turbo-build");
+    await writeFile(join(chunks, "3rf7vuwqjn2o9.js"), 'x=1\n//# sourceMappingURL=436du6w0scwwt.js.map');
+    await writeFile(join(chunks, "436du6w0scwwt.js.map"), '{"version":3,"sources":["src/page.tsx"],"mappings":""}');
+
+    const result = await runMaps({ dir: root });
+
+    // Stored under the CHUNK name, which is what a stack frame carries.
+    const stored = await readdir(result.destination);
+    expect(stored).toContain("3rf7vuwqjn2o9.js.map");
+    const contents = await readFile(join(result.destination, "3rf7vuwqjn2o9.js.map"), "utf8");
+    expect(contents).toContain("src/page.tsx");
+  });
+
+  it("moves orphan maps out of the public output too", async () => {
+    const nextDir = join(root, ".next");
+    const chunks = join(nextDir, "static", "chunks");
+    await mkdir(chunks, { recursive: true });
+    await writeFile(join(nextDir, "BUILD_ID"), "b1");
+    // A map no chunk points at. Unlookupable, but it must not stay public.
+    await writeFile(join(chunks, "orphan.js.map"), "{}");
+
+    await runMaps({ dir: root });
+    expect(await readdir(chunks)).toEqual([]);
+  });
+
+  it("leaves a chunk with an inline data: map alone", async () => {
+    const nextDir = join(root, ".next");
+    const chunks = join(nextDir, "static", "chunks");
+    await mkdir(chunks, { recursive: true });
+    await writeFile(join(nextDir, "BUILD_ID"), "b1");
+    await writeFile(join(chunks, "a.js"), "x=1\n//# sourceMappingURL=data:application/json;base64,e30=");
+
+    const result = await runMaps({ dir: root });
+    expect(result.moved).toBe(0);
+    // The pointer still goes: an inline map is the source shipped verbatim.
+    expect(await readFile(join(chunks, "a.js"), "utf8")).not.toContain("sourceMappingURL");
+  });
+});
+
+describe("standalone output layouts", () => {
+  /**
+   * Next nests standalone output by workspace-relative path when it detects a
+   * monorepo, so `server.js` can sit several directories below the standalone
+   * root. The runtime resolves maps at `process.cwd()/.watchfire/maps`, and
+   * cwd is wherever server.js is, so maps written to the root would silently
+   * never be found. Every frame would stay unresolved and look exactly like
+   * "no maps for this release", which is why this is tested rather than
+   * assumed.
+   */
+  it("places maps beside a nested server.js", async () => {
+    await fakeBuild();
+    const nested = join(root, ".next", "standalone", "packages", "web");
+    await mkdir(nested, { recursive: true });
+    await writeFile(join(nested, "server.js"), "// entry point");
+
+    const result = await runMaps({ dir: root });
+    expect(result.destination).toBe(join(nested, MAPS_DIR, "build-abc123"));
+  });
+
+  it("places maps at the standalone root for a plain app", async () => {
+    await fakeBuild();
+    const standalone = join(root, ".next", "standalone");
+    await writeFile(join(standalone, "server.js"), "// entry point");
+
+    const result = await runMaps({ dir: root });
+    expect(result.destination).toBe(join(standalone, MAPS_DIR, "build-abc123"));
+  });
+
+  it("ignores a server.js vendored inside node_modules", async () => {
+    await fakeBuild();
+    const standalone = join(root, ".next", "standalone");
+    const vendored = join(standalone, "node_modules", "some-dep");
+    await mkdir(vendored, { recursive: true });
+    await writeFile(join(vendored, "server.js"), "// not the entry point");
+    await writeFile(join(standalone, "server.js"), "// the real one");
+
+    const result = await runMaps({ dir: root });
+    expect(result.destination).toBe(join(standalone, MAPS_DIR, "build-abc123"));
+  });
+});

@@ -82,11 +82,36 @@ function defaultClientIp(request: Request): string | null {
   return request.headers.get("x-real-ip");
 }
 
+/**
+ * Same-origin check.
+ *
+ * The comparison is against the HOST HEADER, not `request.url`. A server
+ * behind a reverse proxy sees its own internal address in `request.url`
+ * (Next.js standalone reports the bind address, and an ALB or nginx rewrites
+ * the target anyway), so comparing against it rejects every genuine
+ * same-origin report while looking correct in a unit test built from a
+ * synthetic Request. `x-forwarded-host` takes precedence because that is what
+ * the browser actually addressed.
+ *
+ * This is a cheap filter against another site posting junk, not a security
+ * boundary: the rate limit and the body caps are what bound abuse.
+ */
 function defaultAllowOrigin(origin: string | null, request: Request): boolean {
   // sendBeacon and same-origin fetch may omit Origin entirely.
   if (origin === null) return true;
+  let originHost: string;
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    originHost = new URL(origin).host;
+  } catch {
+    return false;
+  }
+
+  const forwarded = request.headers.get("x-forwarded-host");
+  const host = forwarded?.split(",")[0]?.trim() ?? request.headers.get("host");
+  if (host !== null && host !== undefined && host.length > 0) return originHost === host;
+
+  try {
+    return originHost === new URL(request.url).host;
   } catch {
     return false;
   }
@@ -233,3 +258,4 @@ export function createIngestHandler(options: IngestOptions): (request: Request) 
 export type { WatchfireEvent, Frame, Breadcrumb } from "../types.js";
 export type { MapStore } from "../sourcemaps/store.js";
 export { filesystemStore, s3Store, layeredStore } from "../sourcemaps/store.js";
+export { defaultMapsDir } from "../sourcemaps/default-dir.js";

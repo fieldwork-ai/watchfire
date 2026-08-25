@@ -5,5 +5,6 @@ export { registerMaps } from "./register.js";
 export type { RegisterMapsOptions } from "./register.js";
 export { originalPositionFor, tidySourcePath } from "./vlq.js";
 export type { ParsedSourceMap, OriginalPosition } from "./vlq.js";
+export { defaultMapsDir } from "./default-dir.js";
 /** Where the `watchfire maps` build step places maps inside the server output. */
 export { MAPS_DIR } from "../constants.js";

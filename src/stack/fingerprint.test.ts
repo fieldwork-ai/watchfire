@@ -68,6 +68,37 @@ describe("fingerprint", () => {
     expect(a).toBe(b);
   });
 
+  it("ignores third-party frames entirely", () => {
+    // The cross-engine bug: V8 and JSC disagree about which framework frames
+    // exist, so any key built from them differs by browser.
+    const dep = frame({ file: "node_modules/react-dom/cjs/react-dom.production.js", line: 13717 });
+    const pnpm = frame({ file: "node_modules/.pnpm/next@16/dist/client.js", line: 42 });
+    const withDeps = [frame(), dep, pnpm];
+    expect(fingerprint(withDeps, "boom", "error")).toBe(fingerprint([frame()], "boom", "error"));
+  });
+
+  it("is stable when an engine elides an application frame", () => {
+    // Chromium reports the onClick frame; WebKit does not. Same bug, one key.
+    const chromium = [
+      frame({ file: "src/broken.ts", line: 10 }),
+      frame({ file: "app/page.tsx", line: 22 }),
+      frame({ file: "node_modules/react-dom/x.js", line: 1 }),
+    ];
+    const webkit = [
+      frame({ file: "src/broken.ts", line: 10 }),
+      frame({ file: "node_modules/react-dom/x.js", line: 1 }),
+    ];
+    expect(fingerprint(chromium, "boom", "error")).toBe(fingerprint(webkit, "boom", "error"));
+  });
+
+  it("falls back to a dependency frame when nothing in the app resolved", () => {
+    const onlyDeps = [frame({ file: "node_modules/left-pad/index.js", line: 7 })];
+    expect(fingerprint(onlyDeps, "boom", "error")).toHaveLength(16);
+    // Still separates two different dependency locations.
+    const other = [frame({ file: "node_modules/left-pad/index.js", line: 99 })];
+    expect(fingerprint(onlyDeps, "boom", "error")).not.toBe(fingerprint(other, "boom", "error"));
+  });
+
   it("prefers resolved frames over unresolved ones", () => {
     const mixed = [frame({ resolved: false, file: "chunk-4f2a.js" }), frame()];
     // Adding an unresolved frame in front must not change the key, or every

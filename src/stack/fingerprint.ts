@@ -53,26 +53,52 @@ function fnv1a64(input: string): string {
 }
 
 /**
- * How many frames feed the key. Deep frames are shared by unrelated bugs (the
- * framework's dispatch machinery), so including all of them under-groups;
- * including only one over-groups when a single helper throws for many callers.
+ * Third-party code: dependencies and framework internals.
+ *
+ * These frames must not reach the key, for a reason the cross-engine e2e made
+ * unarguable. The engines disagree about which frames exist at all: for one
+ * React click handler, V8 reports the handler frame that JSC elides. Any key
+ * built from more than the application's own top frame therefore differs
+ * between Chrome and Safari, and one bug becomes two issues.
  */
-const SIGNIFICANT_FRAMES = 3;
+const THIRD_PARTY = /(?:^|\/)node_modules\/|(?:^|\/)\.pnpm\/|(?:^|\/)vendor-chunks?\//;
+
+function isApplicationFrame(frame: Frame): boolean {
+  return frame.resolved && !THIRD_PARTY.test(frame.file);
+}
+
+/**
+ * The key's basis, in descending order of stability.
+ *
+ * Resolved application frames beat everything: original paths and line numbers
+ * survive a rebuild, where a generated chunk name does not. Only the TOP one is
+ * used, because the depth of the application's own frames also varies by
+ * engine. The cost is that one helper throwing the same message for several
+ * callers groups as one issue; the normalized message is what separates the
+ * cases that genuinely differ.
+ */
+function basisFor(frames: Frame[]): string | null {
+  const inApp = frames.find(isApplicationFrame);
+  if (inApp !== undefined) return `${inApp.file}:${inApp.line}`;
+
+  // No application frame resolved: an error thrown entirely inside a
+  // dependency, or a release with no maps.
+  const resolved = frames.find((frame) => frame.resolved);
+  if (resolved !== undefined) return `${resolved.file}:${resolved.line}`;
+
+  // Nothing resolved at all. Function names survive minification only when the
+  // build keeps them (`keep_fnames`), so this over-groups without it, but it
+  // never varies across deploys the way a chunk hash would.
+  const named = frames.find((frame) => frame.fn !== null);
+  return named?.fn ?? null;
+}
 
 export function fingerprint(frames: Frame[], message: string, kind: string): string {
-  const resolved = frames.filter((f) => f.resolved);
-  const basis = resolved.length > 0 ? resolved : frames;
-
-  const parts = basis
-    .slice(0, SIGNIFICANT_FRAMES)
-    .map((f) => (f.resolved ? `${f.file}:${f.line}:${f.fn ?? "?"}` : (f.fn ?? "?")))
-    .filter((part) => part !== "?");
-
-  // No usable frame data at all: the message carries the whole signature.
+  const basis = basisFor(frames);
   const signature =
-    parts.length > 0
-      ? `${kind}|${parts.join("|")}|${normalizeMessage(message)}`
-      : `${kind}|${normalizeMessage(message)}`;
+    basis === null
+      ? `${kind}|${normalizeMessage(message)}`
+      : `${kind}|${basis}|${normalizeMessage(message)}`;
 
   return fnv1a64(signature);
 }
