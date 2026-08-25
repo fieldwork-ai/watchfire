@@ -8,13 +8,13 @@ importers:
 
   .:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.0.0
-        version: 3.1117.0
       react:
         specifier: '>=18'
         version: 19.2.8
     devDependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1117.0
+        version: 3.1117.0
       '@playwright/test':
         specifier: ^1.61.1
         version: 1.62.1

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { filesystemStore, layeredStore, type MapStore } from "./store.js";
+import { filesystemStore, layeredStore, s3Store, type MapStore } from "./store.js";
 import { registerMaps } from "./register.js";
 
 let root: string;
@@ -170,5 +170,31 @@ describe("registerMaps", () => {
     await expect(
       registerMaps({ release: "rel-1", localDir, store: broken }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("s3Store type compatibility", () => {
+  /**
+   * Pins the adapter signature against the REAL SDK. The first version of
+   * these types (`(command: unknown) => Promise<unknown>`) looked stricter and
+   * more correct, and no test caught that the actual S3Client is not
+   * assignable to it: `send` is a set of overloads, and parameters are
+   * contravariant. It surfaced only when a consumer wired it up.
+   *
+   * This is a compile-time assertion; that it runs at all is incidental.
+   */
+  it("accepts a real S3Client and the real command constructors", async () => {
+    const { S3Client, GetObjectCommand, PutObjectCommand, ListObjectsV2Command } =
+      await import("@aws-sdk/client-s3");
+
+    const store = s3Store({
+      bucket: "example",
+      client: new S3Client({ region: "us-east-2" }),
+      commands: { GetObjectCommand, PutObjectCommand, ListObjectsV2Command },
+    });
+
+    expect(typeof store.get).toBe("function");
+    expect(typeof store.put).toBe("function");
+    expect(typeof store.list).toBe("function");
   });
 });

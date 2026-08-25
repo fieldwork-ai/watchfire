@@ -70,16 +70,26 @@ export interface S3StoreOptions {
    * An `@aws-sdk/client-s3` S3Client. Passed in rather than constructed so the
    * library never owns credential resolution or the region, and so the SDK
    * stays an optional peer dependency for hosts that use a different store.
+   *
+   * `any` is deliberate at this boundary and cannot be tightened. `S3Client.send`
+   * is a set of overloads over the SDK's own union of command types, so a
+   * narrower signature here (`(command: unknown) => Promise<unknown>`) is not
+   * assignable FROM the real client: parameters are contravariant, and a
+   * function accepting specific commands cannot stand in for one accepting
+   * anything. Typing it properly would mean importing the SDK, which is exactly
+   * what keeping it an optional peer forbids. Every value read back out of
+   * these calls is narrowed before use.
    */
-  client: {
-    send: (command: unknown) => Promise<unknown>;
-  };
-  /** The three command constructors from `@aws-sdk/client-s3`. */
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  client: { send: (command: any) => Promise<any> };
+  /** The three command constructors from `@aws-sdk/client-s3`. See above. */
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   commands: {
-    GetObjectCommand: new (input: Record<string, unknown>) => unknown;
-    PutObjectCommand: new (input: Record<string, unknown>) => unknown;
-    ListObjectsV2Command: new (input: Record<string, unknown>) => unknown;
+    GetObjectCommand: new (input: any) => any;
+    PutObjectCommand: new (input: any) => any;
+    ListObjectsV2Command: new (input: any) => any;
   };
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 /**
