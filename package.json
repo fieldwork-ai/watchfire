@@ -28,6 +28,10 @@
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
     },
+    "./next": {
+      "types": "./dist/next/index.d.ts",
+      "default": "./dist/next/index.js"
+    },
     "./stack": {
       "types": "./dist/stack/index.d.ts",
       "default": "./dist/stack/index.js"
