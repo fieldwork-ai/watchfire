@@ -142,14 +142,20 @@ test("breadcrumbs never carry element text content", async ({ page }) => {
 
 test("a hot loop is suppressed rather than sending fifty reports", async ({ page }) => {
   await page.click("#loop");
-  const events = await received(page, 1);
-  await page.waitForTimeout(500);
+  await received(page, 1);
+  await page.waitForTimeout(1000);
   const settled: WatchfireEvent[] = await (await page.request.get("/api/received")).json();
 
-  // Fifty throws, at most three sends, and the count is preserved rather than
-  // silently discarded.
+  // Fifty throws, at most three sends.
+  expect(settled.length).toBeGreaterThan(0);
   expect(settled.length).toBeLessThanOrEqual(3);
-  expect(events.length).toBeGreaterThan(0);
+
+  // And the discarded ones are COUNTED, not lost. Before this was attached at
+  // flush time, the count could only ride along on the next report of the same
+  // signature — so a loop that fires and stops, which is the usual shape,
+  // reported three errors and silently dropped the other forty-seven.
+  const counted = settled.reduce((total, event) => total + event.suppressed, 0);
+  expect(counted).toBeGreaterThan(0);
 });
 
 test("known-noise errors are dropped client-side", async ({ page }) => {

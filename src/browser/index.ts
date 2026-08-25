@@ -74,7 +74,11 @@ interface State {
     context: InitOptions["context"];
   };
   buffer: BreadcrumbBuffer;
-  queue: RawReport[];
+  /**
+   * Queued reports keep their signature so `flush` can attach whatever was
+   * suppressed while they waited. Stripped before sending.
+   */
+  queue: Array<{ report: RawReport; signature: string }>;
   /** Sends so far, per signature, this page load. */
   seen: Map<string, number>;
   /** Occurrences suppressed since the last send, per signature. */
@@ -144,7 +148,21 @@ function flush(): void {
     clearTimeout(state.timer);
     state.timer = null;
   }
-  send(queue, options.endpoint);
+
+  // Attach what was suppressed while these reports sat in the queue.
+  //
+  // Without this the count is very nearly useless: it can only ride along on
+  // the NEXT report of the same signature, and the common case — a hot loop
+  // that fires a few hundred times and then stops — has no next report, so
+  // "and this happened 400 more times" is silently lost. The batching window
+  // is exactly when the suppression happens, so flush is where it is known.
+  const reports = queue.map(({ report, signature }) => {
+    const pending = state?.suppressed.get(signature) ?? 0;
+    if (pending > 0) state?.suppressed.delete(signature);
+    return pending > 0 ? { ...report, suppressed: report.suppressed + pending } : report;
+  });
+
+  send(reports, options.endpoint);
 }
 
 function enqueue(report: Omit<RawReport, "v" | "suppressed" | "pageAgeMs">): void {
@@ -168,10 +186,15 @@ function enqueue(report: Omit<RawReport, "v" | "suppressed" | "pageAgeMs">): voi
   state.sent += 1;
 
   state.queue.push({
-    ...report,
-    v: WIRE_VERSION,
-    suppressed: state.suppressed.get(signature) ?? 0,
-    pageAgeMs: Date.now() - state.pageLoadedAt,
+    signature,
+    report: {
+      ...report,
+      v: WIRE_VERSION,
+      // Anything suppressed BEFORE this report was queued. Anything suppressed
+      // while it waits is added by `flush`.
+      suppressed: state.suppressed.get(signature) ?? 0,
+      pageAgeMs: Date.now() - state.pageLoadedAt,
+    },
   });
   state.suppressed.delete(signature);
 
