@@ -141,6 +141,25 @@ function scrubBreadcrumbs(crumbs: unknown): Breadcrumb[] {
   return out;
 }
 
+/**
+ * Bounds the host's context claim. Scalars only, few of them, short keys and
+ * values: it arrives from the client, so its only guarantee is its shape. The
+ * host validates the MEANING — that a tenant id names a tenant the caller may
+ * write to — because only the host can.
+ */
+const MAX_CONTEXT_KEYS = 12;
+
+function scrubContext(value: unknown): Record<string, string | number | boolean> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, entry] of Object.entries(value).slice(0, MAX_CONTEXT_KEYS)) {
+    if (typeof entry === "string") out[key.slice(0, 64)] = entry.slice(0, 200);
+    else if (typeof entry === "number" && Number.isFinite(entry)) out[key.slice(0, 64)] = entry;
+    else if (typeof entry === "boolean") out[key.slice(0, 64)] = entry;
+  }
+  return out;
+}
+
 function validReport(value: unknown): value is RawReport {
   if (typeof value !== "object" || value === null) return false;
   const report = value as Partial<RawReport>;
@@ -231,6 +250,7 @@ export function createIngestHandler(options: IngestOptions): (request: Request) 
             ? { componentStack: report.componentStack.slice(0, 4000) }
             : {}),
           breadcrumbs: scrubBreadcrumbs(report.breadcrumbs),
+          context: scrubContext(report.context),
           suppressed:
             typeof report.suppressed === "number" && report.suppressed > 0
               ? Math.min(report.suppressed, 1_000_000)

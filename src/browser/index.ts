@@ -38,6 +38,15 @@ export interface InitOptions {
   maxReportsPerPage?: number;
   /** Sends per distinct signature per page load. Default 3. */
   maxPerSignature?: number;
+  /**
+   * Scalars to attach to every report: a tenant id, a workspace, a flag.
+   * Called at capture time rather than read once, so a value that changes
+   * during the session (the active organization, say) is current.
+   *
+   * This exists because `sendBeacon` cannot set request headers, so a header
+   * cannot carry it. The server receives it as an untrusted claim.
+   */
+  context?: () => Record<string, string | number | boolean> | undefined;
 }
 
 /**
@@ -58,10 +67,11 @@ const DEFAULT_IGNORE: RegExp[] = [
 ];
 
 interface State {
-  options: Required<Omit<InitOptions, "capture" | "ignoreErrors" | "release">> & {
+  options: Required<Omit<InitOptions, "capture" | "ignoreErrors" | "release" | "context">> & {
     release: string | null;
     capture: CaptureConfig;
     ignoreErrors: (string | RegExp)[];
+    context: InitOptions["context"];
   };
   buffer: BreadcrumbBuffer;
   queue: RawReport[];
@@ -178,6 +188,14 @@ export function captureError(
   if (state === null) return;
   try {
     const isError = error instanceof Error;
+    // Evaluated defensively: a host callback that throws must not cost the
+    // report it was only decorating.
+    let hostContext: Record<string, string | number | boolean> | undefined;
+    try {
+      hostContext = state.options.context?.();
+    } catch {
+      hostContext = undefined;
+    }
     enqueue({
       message: isError ? `${error.name}: ${error.message}` : String(error),
       stack: isError ? (error.stack ?? null) : null,
@@ -185,6 +203,7 @@ export function captureError(
       path: safePath(location.pathname),
       release: state.options.release,
       breadcrumbs: state.buffer.snapshot(),
+      ...(hostContext === undefined ? {} : { context: hostContext }),
       ...(context?.componentStack === undefined
         ? {}
         : { componentStack: context.componentStack.slice(0, 4000) }),
@@ -195,7 +214,10 @@ export function captureError(
 }
 
 /** Records a breadcrumb by hand, for app events the recorders cannot see. */
-export function addBreadcrumb(message: string, data?: Record<string, string | number>): void {
+export function addBreadcrumb(
+  message: string,
+  data?: Record<string, string | number | boolean>,
+): void {
   try {
     state?.buffer.add("navigation", message, data);
   } catch {
@@ -248,6 +270,7 @@ export function init(options: InitOptions): () => void {
       flushIntervalMs: options.flushIntervalMs ?? 3000,
       maxReportsPerPage: options.maxReportsPerPage ?? 20,
       maxPerSignature: options.maxPerSignature ?? 3,
+      context: options.context,
     },
     buffer,
     queue: [],

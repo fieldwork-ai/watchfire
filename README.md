@@ -93,6 +93,18 @@ import { init } from "watchfire/browser";
 init({ endpoint: "/api/errors", release: process.env.NEXT_PUBLIC_RELEASE });
 ```
 
+To attribute reports to a tenant, pass a `context` callback. It is evaluated per report, so a value that changes during the session stays current:
+
+```ts
+init({
+  endpoint: "/api/errors",
+  release: process.env.NEXT_PUBLIC_RELEASE,
+  context: () => ({ org: currentOrgId() }),
+});
+```
+
+`sendBeacon` cannot set request headers, which is why this exists rather than a header. It arrives at `onEvent` as `event.context`, bounded to a dozen scalars but **not verified** — validate it against the authenticated caller before storing anything you intend to trust.
+
 That is the whole integration. To resolve errors from browsers still running an older release, pass a shared store instead and register each release on boot:
 
 ```ts

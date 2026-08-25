@@ -44,6 +44,13 @@ export interface RawReport {
   suppressed: number;
   /** Milliseconds since the page loaded, for ordering within a session. */
   pageAgeMs: number;
+  /**
+   * Host-supplied scalars: a tenant id, a feature flag, a workspace. Sent by
+   * the client and therefore UNTRUSTED — the host must validate anything it
+   * intends to rely on. It exists because `sendBeacon` cannot set request
+   * headers, so a header is not available to carry this.
+   */
+  context?: Record<string, string | number | boolean>;
 }
 
 export interface RawEnvelope {
@@ -78,6 +85,12 @@ export interface WatchfireEvent {
   componentStack?: string;
   breadcrumbs: Breadcrumb[];
   suppressed: number;
+  /**
+   * The host context the client sent, bounded and type-checked but NOT
+   * verified. Treat it as a claim: validate before storing anything that
+   * attributes a report to a tenant.
+   */
+  context: Record<string, string | number | boolean>;
   /** Set from the request, not the payload: clients must not assert identity. */
   userAgent: string | null;
   receivedAt: Date;

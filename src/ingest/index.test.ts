@@ -315,6 +315,53 @@ describe("createIngestHandler", () => {
     });
   });
 
+  describe("host context", () => {
+    /**
+     * `sendBeacon` cannot set request headers, which is the entire reason this
+     * exists: a host that wants to attribute a report to a tenant has nowhere
+     * else to put the value. It arrives as a CLAIM and is bounded, never
+     * trusted — validating it is the host's job because only the host can.
+     */
+    it("passes host context through to the event", async () => {
+      const { events, handler } = harness();
+      await handler(post([{ ...report(), context: { org: "org-1", beta: true, seat: 3 } }]));
+      expect(events[0]?.context).toEqual({ org: "org-1", beta: true, seat: 3 });
+    });
+
+    it("defaults to an empty object when the client sends none", async () => {
+      const { events, handler } = harness();
+      await handler(post([report()]));
+      expect(events[0]?.context).toEqual({});
+    });
+
+    it("drops non-scalar values rather than storing structures", async () => {
+      const { events, handler } = harness();
+      await handler(post([{
+        ...report(),
+        context: { ok: "yes", nested: { a: 1 }, list: [1, 2], fn: null },
+      } as unknown as RawReport]));
+      expect(events[0]?.context).toEqual({ ok: "yes" });
+    });
+
+    it("bounds the number of keys and the length of values", async () => {
+      const big: Record<string, string> = {};
+      for (let i = 0; i < 50; i++) big[`k${i}`] = "v".repeat(500);
+      const { events, handler } = harness();
+      await handler(post([{ ...report(), context: big }]));
+      const context = events[0]?.context ?? {};
+      expect(Object.keys(context).length).toBeLessThanOrEqual(12);
+      for (const value of Object.values(context)) {
+        expect(String(value).length).toBeLessThanOrEqual(200);
+      }
+    });
+
+    it("ignores a context that is not an object", async () => {
+      const { events, handler } = harness();
+      await handler(post([{ ...report(), context: "not-an-object" } as unknown as RawReport]));
+      expect(events[0]?.context).toEqual({});
+    });
+  });
+
   it("preserves the suppressed count from the client", async () => {
     const { events, handler } = harness();
     await handler(post([report({ suppressed: 214 })]));
