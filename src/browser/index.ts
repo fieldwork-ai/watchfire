@@ -50,21 +50,38 @@ export interface InitOptions {
 }
 
 /**
- * Errors that carry no information and fire in volume.
+ * Errors that are noise for EVERY app, at any volume, in any deployment.
+ *
+ * That bar is deliberately high, and it is the whole rule for this list. A
+ * library has no business deciding what is noise for its hosts: chunk-load
+ * failures are routine for a team deploying hourly and alarming for one
+ * deploying monthly, and for a team investigating why users lose their session
+ * mid-task they may be the most important signal there is. Anything that is
+ * noise merely *sometimes* belongs in the host's own `ignoreErrors`, or better,
+ * in the host's classification of what deserves attention.
  *
  * `ResizeObserver loop` is a benign browser notice that a resize handler ran
  * long; every app produces it and nobody has ever fixed a bug from one. Script
  * errors from other origins arrive with no message, file or line, so they
- * cannot be grouped or acted on. Extension errors are not the site's code.
+ * cannot be grouped or acted on. Extension code is not the site's code.
  */
 const DEFAULT_IGNORE: RegExp[] = [
   /ResizeObserver loop/,
   /(^|: )Script error\.?$/,
   /Non-Error promise rejection captured/,
-  /extensions?\//i,
-  /^chrome-extension:\/\//,
-  /^moz-extension:\/\//,
 ];
+
+/**
+ * Sources whose errors are not the site's code.
+ *
+ * Matched against the STACK, not the message, because that is where a browser
+ * extension actually identifies itself. An injected script throws a perfectly
+ * ordinary `TypeError: Cannot read properties of null` — the only thing
+ * marking it as someone else's is the `chrome-extension://` frame in the
+ * trace. Matching the message caught almost nothing while looking like
+ * coverage.
+ */
+const FOREIGN_SOURCES = /(?:chrome|moz|safari|ms-browser)-extension:\/\//i;
 
 interface State {
   options: Required<Omit<InitOptions, "capture" | "ignoreErrors" | "release" | "context">> & {
@@ -101,10 +118,22 @@ function signatureOf(message: string, stack: string | null): string {
   return `${message.slice(0, 120)}|${firstFrame.slice(0, 120)}`;
 }
 
-function shouldIgnore(message: string, patterns: (string | RegExp)[]): boolean {
+function shouldIgnore(
+  message: string,
+  stack: string | null,
+  patterns: (string | RegExp)[],
+): boolean {
+  if (stack !== null && FOREIGN_SOURCES.test(stack)) return true;
+
+  // Host patterns are tested against the stack too: a host filtering a
+  // third-party widget has the same problem extensions do, in that the
+  // identifying detail is the frame rather than the message.
+  const haystacks = stack === null ? [message] : [message, stack];
   for (const pattern of [...DEFAULT_IGNORE, ...patterns]) {
-    if (typeof pattern === "string" ? message.includes(pattern) : pattern.test(message)) {
-      return true;
+    for (const haystack of haystacks) {
+      const hit =
+        typeof pattern === "string" ? haystack.includes(pattern) : pattern.test(haystack);
+      if (hit) return true;
     }
   }
   return false;
@@ -169,7 +198,7 @@ function enqueue(report: Omit<RawReport, "v" | "suppressed" | "pageAgeMs">): voi
   if (state === null) return;
   const { options } = state;
 
-  if (shouldIgnore(report.message, options.ignoreErrors)) return;
+  if (shouldIgnore(report.message, report.stack, options.ignoreErrors)) return;
 
   const signature = signatureOf(report.message, report.stack);
   const alreadySent = state.seen.get(signature) ?? 0;

@@ -47,6 +47,14 @@ It moves the generated `.map` files out of the public static directory into a pr
 
 At runtime, resolution reads those maps from local disk, which always matches the version the server is running. Configure a shared store (S3-compatible, or a filesystem path) and each server registers its own maps on startup, so errors from browsers still running last week's bundle resolve too. Skip the store and those stale-bundle errors degrade to function names rather than exact lines. Nothing breaks either way.
 
+## What it drops for you
+
+Only what is noise for every app: `ResizeObserver loop`, contentless cross-origin `Script error`, and anything thrown from a browser-extension frame.
+
+**Chunk-load failures, network errors and aborted requests are NOT filtered by default**, deliberately. For a team deploying hourly they are routine; for one deploying monthly they are alarming; for a team asking why users lose their place mid-session they are the whole signal. A library cannot know which you are, so it does not decide. Filter them yourself with `ignoreErrors`, or better, classify them in `onEvent` so they are still counted.
+
+Extension noise is matched against the **stack**, not the message — injected scripts throw ordinary-looking `TypeError`s and the frame URL is the only thing that identifies them. `ignoreErrors` patterns are matched against both, so a noisy third-party widget can be filtered by its script URL.
+
 ## Privacy defaults
 
 Capture is tiered, and the defaults are the safe end of each tier:
