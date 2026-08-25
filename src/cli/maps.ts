@@ -15,18 +15,23 @@
  * exists. It also means the build needs no credentials and no network, so it
  * behaves identically in CI, in a fork PR, and on a laptop.
  *
- * The destination sits INSIDE `.next/standalone`, which existing Dockerfiles
- * already copy wholesale. That is why adopting Watchfire needs no Dockerfile
- * change: the maps ride along with the server that reads them.
+ * The three steps are bundler-neutral; everything bundler-specific (where the
+ * public output is, what names a release, where the server will run from)
+ * lives behind the preset seam in ./presets. Next is the only preset today
+ * and is auto-detected, so the command needs no flags on a Next project.
  */
 import { readdir, readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { MAPS_DIR } from "../constants.js";
+import { nextPreset } from "./presets/next.js";
+import type { BundlePreset } from "./presets/types.js";
+
+const PRESETS: BundlePreset[] = [nextPreset];
 
 export interface MapsOptions {
-  /** Project root containing `.next`. Defaults to cwd. */
+  /** Project root containing the build output. Defaults to cwd. */
   dir: string;
-  /** Release id. Defaults to the contents of `.next/BUILD_ID`. */
+  /** Release id. Defaults to the preset's answer (Next: `.next/BUILD_ID`). */
   release?: string | undefined;
   /** Report what would happen without moving anything. */
   dryRun?: boolean;
@@ -56,84 +61,36 @@ async function walk(dir: string): Promise<string[]> {
   return out;
 }
 
-/**
- * The directory holding `server.js` inside standalone output, which is the
- * working directory the server will run from. Breadth-first and shallow: the
- * nesting mirrors the workspace path, which is never deep, and the first match
- * from the top is the entry point rather than a vendored copy in node_modules.
- */
-async function findServerDir(standaloneDir: string, maxDepth = 5): Promise<string | null> {
-  let frontier = [standaloneDir];
-  for (let depth = 0; depth <= maxDepth && frontier.length > 0; depth++) {
-    const next: string[] = [];
-    for (const dir of frontier) {
-      let entries;
-      try {
-        entries = await readdir(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      if (entries.some((entry) => entry.isFile() && entry.name === "server.js")) return dir;
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name !== "node_modules") next.push(join(dir, entry.name));
-      }
-    }
-    frontier = next;
+async function resolvePreset(root: string): Promise<BundlePreset> {
+  for (const preset of PRESETS) {
+    if (await preset.detect(root)) return preset;
   }
-  return null;
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
+  // Next is the only preset, so the actionable message is Next's. When a
+  // second preset exists this becomes a list of what was looked for.
+  throw new Error(
+    `No .next directory at ${join(root, ".next")}. Run this after \`next build\`.`,
+  );
 }
 
 export async function runMaps(options: MapsOptions): Promise<MapsResult> {
   const log = options.log ?? (() => {});
   const root = options.dir;
-  const nextDir = join(root, ".next");
-
-  if (!(await exists(nextDir))) {
-    throw new Error(`No .next directory at ${nextDir}. Run this after \`next build\`.`);
-  }
+  const preset = await resolvePreset(root);
 
   let release = options.release;
   if (release === undefined || release.length === 0) {
-    try {
-      release = (await readFile(join(nextDir, "BUILD_ID"), "utf8")).trim();
-    } catch {
-      throw new Error(
-        "Could not read .next/BUILD_ID. Pass --release explicitly.",
-      );
-    }
+    release = await preset.defaultRelease(root);
   }
 
-  const staticDir = join(nextDir, "static");
-  const standaloneDir = join(nextDir, "standalone");
+  const publicDir = preset.publicDir(root);
+  const destination = join(await preset.destinationRoot(root), MAPS_DIR, release);
 
-  // Maps must land where the SERVER's working directory will be, because the
-  // runtime resolves them at `process.cwd()/.watchfire/maps`. For a plain app
-  // that is the standalone root, but Next nests the output by workspace-
-  // relative path when it detects a monorepo, putting server.js several
-  // directories down. Locating server.js is the only rule correct for both.
-  const destinationRoot = (await exists(standaloneDir))
-    ? ((await findServerDir(standaloneDir)) ?? standaloneDir)
-    : nextDir;
-  const destination = join(destinationRoot, MAPS_DIR, release);
-
-  const files = await walk(staticDir);
+  const files = await walk(publicDir);
   const maps = files.filter((file) => file.endsWith(".map"));
   const scripts = files.filter((file) => file.endsWith(".js") || file.endsWith(".mjs"));
 
   if (maps.length === 0) {
-    log(
-      "watchfire: no .map files found under .next/static. " +
-        "Set `productionBrowserSourceMaps: true` in next.config.",
-    );
+    log(preset.missingMapsHint);
   }
 
   if (options.dryRun === true) {
@@ -164,7 +121,7 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
       const dir = script.slice(0, script.lastIndexOf("/"));
       const mapPath = join(dir, pointer[1]);
       const chunkName = script.split("/").pop();
-      if (chunkName !== undefined && (await exists(mapPath))) {
+      if (chunkName !== undefined && (await fileExists(mapPath))) {
         await rename(mapPath, join(destination, `${chunkName}.map`));
         claimed.add(mapPath);
         moved++;
@@ -193,10 +150,10 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
   // The verification is the point of the whole command. A map left under the
   // public directory means the app is serving its own source, and that failure
   // is silent in every other respect.
-  const leftover = (await walk(staticDir)).filter((file) => file.endsWith(".map"));
+  const leftover = (await walk(publicDir)).filter((file) => file.endsWith(".map"));
   if (leftover.length > 0) {
     throw new Error(
-      `watchfire: ${leftover.length} source map(s) still public under .next/static: ` +
+      `watchfire: ${leftover.length} source map(s) still public under ${relative(root, publicDir)}: ` +
         `${leftover.slice(0, 3).map((file) => relative(root, file)).join(", ")}`,
     );
   }
@@ -207,4 +164,13 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
   );
 
   return { release, moved, stripped, destination };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }

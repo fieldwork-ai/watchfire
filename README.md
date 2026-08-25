@@ -42,7 +42,7 @@ One package, five subpath exports and a CLI:
 | `watchfire/stack` | Stack parsing (Chrome, Safari, and Firefox formats) and fingerprinting |
 | `watchfire/sourcemaps` | Map stores, the runtime resolver, boot-time registration |
 
-The build tooling targets Next.js; the runtime is framework-neutral.
+The build tooling targets Next.js; the runtime is framework-neutral. The contract for using the runtime pieces elsewhere is documented in [docs/without-nextjs.md](docs/without-nextjs.md).
 
 ## Setup
 
