@@ -37,6 +37,20 @@ describe("withWatchfire", () => {
     expect(await config.generateBuildId?.()).toBe("host-id");
   });
 
+  it("accepts an interface-typed config, as NextConfig is", async () => {
+    // Pins the regression the first release shipped: an index signature on
+    // the parameter type made `NextConfig` (an interface) unassignable.
+    interface HostConfig {
+      output?: string;
+      productionBrowserSourceMaps?: boolean;
+      generateBuildId?: () => string | null | Promise<string | null>;
+    }
+    const host: HostConfig = { output: "standalone" };
+    const config = withWatchfire(host, { release: "r1" });
+    expect(config.output).toBe("standalone");
+    expect(await config.generateBuildId()).toBe("r1");
+  });
+
   it("passes unrelated config through untouched", () => {
     const headers = async () => [];
     const config = withWatchfire({ headers, images: { unoptimized: true } });
