@@ -1,6 +1,6 @@
 {
   "name": "watchfire",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Self-hosted error tracking for Next.js. A library, not a service.",
   "license": "MIT",
   "repository": {

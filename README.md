@@ -42,16 +42,33 @@ The handler is a plain fetch-style function, so it drops into a Next.js route ha
 
 ## Setup
 
-The integration is three changes. First, the build step, with `productionBrowserSourceMaps: true` in `next.config.ts`:
+Three changes: the build, a route, and the client.
 
-```json
-"build": "next build && watchfire maps"
-```
+### 1. The build
 
-Second, a route:
+In `next.config.ts`, turn on source map generation:
 
 ```ts
-// app/api/errors/route.ts
+const nextConfig = {
+  productionBrowserSourceMaps: true,
+};
+```
+
+In `package.json`, run `watchfire maps` after the build:
+
+```json
+"scripts": {
+  "build": "next build && watchfire maps"
+}
+```
+
+`next build` writes a `.map` file beside every chunk; `watchfire maps` then moves them all into a private folder inside the server output and fails the build if any map is still publicly fetchable. The maps are stored under a release id, which defaults to Next's build id.
+
+### 2. The route
+
+Create `app/api/errors/route.ts`:
+
+```ts
 import { createIngestHandler, filesystemStore, defaultMapsDir } from "watchfire/ingest";
 
 export const POST = createIngestHandler({
@@ -67,15 +84,29 @@ export const POST = createIngestHandler({
 });
 ```
 
-Third, start the client:
+Every report your users' browsers send arrives here. `onEvent` receives the finished event, parsed and resolved to your original source, with a stable fingerprint. What you do with it is yours.
+
+### 3. The client
+
+Call `init` once, early. In Next, `instrumentation-client.ts` at the project root is the built-in slot for exactly this:
 
 ```ts
+// instrumentation-client.ts
 import { init } from "watchfire/browser";
 
 init({ endpoint: "/api/errors", release: process.env.NEXT_PUBLIC_RELEASE });
 ```
 
-That is the whole integration. The `release` value must be the same string your build ran under, because it names the directory the maps were stored in.
+The `release` must be the same string the maps were stored under in step 1, because the server picks a maps directory by the release each report names. A report naming an unknown release still gets through, just without resolved source positions. The simplest wiring is one env var doing both jobs: set it at build time, return it from `generateBuildId` so it becomes the build id the maps are stored under, and pass it to `init` as above.
+
+```ts
+// next.config.ts
+generateBuildId: () => process.env.NEXT_PUBLIC_RELEASE ?? null,
+```
+
+Returning `null` falls back to Next's generated id, so local dev needs no setup.
+
+That is the whole integration.
 
 To attribute reports to a tenant, pass a `context` callback. It runs per report, so a value that changes mid-session (the active organization, say) stays current:
 
