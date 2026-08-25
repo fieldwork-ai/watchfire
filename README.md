@@ -95,7 +95,7 @@ This exists because reports leave via `sendBeacon`, which cannot set request hea
 
 At runtime, resolution reads those maps from local disk, which by construction matches the version the server is running. That covers every error from a browser on the current bundle, with zero configuration.
 
-The gap is the browser that loaded your app last week and is still running the old bundle. To resolve those, give the handler a shared store and register each release on boot:
+The exception is a user who loaded your app before your last deploy and hasn't refreshed since. Their browser is still running the previous build, so their stack traces point at chunks whose maps the new server never had on disk. To resolve those, give the handler a shared store and register each release on boot:
 
 ```ts
 import { layeredStore, s3Store, filesystemStore, registerMaps, defaultMapsDir } from "watchfire/sourcemaps";
