@@ -1,6 +1,6 @@
 {
   "name": "watchfire",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Self-hosted error tracking for Next.js. A library, not a service.",
   "license": "MIT",
   "repository": {
@@ -55,6 +55,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
+    "prepublishOnly": "npm run build && npm test",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
