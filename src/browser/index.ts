@@ -168,7 +168,7 @@ credentials: "same-origin",
   }
 }
 
-function flush(): void {
+function drainQueue(): void {
   if (state === null) return;
   const { queue, options } = state;
   if (queue.length === 0) return;
@@ -277,6 +277,30 @@ export function addBreadcrumb(
   }
 }
 
+/**
+ * Sends everything queued right now, instead of waiting out the batch window.
+ *
+ * Reports normally sit in a batch for `flushIntervalMs`, and the queue drains
+ * on its own when the page is hidden or torn down. That covers the page going
+ * away for reasons outside your control; it does not cover the page going away
+ * because YOUR code decided so. An app that reloads itself — a stale bundle
+ * refreshing, a recovery path retrying — destroys the queue mid-window unless
+ * it flushes first, and loses exactly the report explaining why it reloaded.
+ *
+ * Delivery uses `sendBeacon`, which the browser completes independently of the
+ * page, so calling this immediately before `location.reload()` is safe. It
+ * returns void rather than a promise on purpose: there is no response to wait
+ * for, and a promise would imply a delivery guarantee the transport cannot
+ * make. A no-op before `init`, or with an empty queue.
+ */
+export function flush(): void {
+  try {
+    drainQueue();
+  } catch {
+    // Same contract as the rest of the surface: reporting never throws.
+  }
+}
+
 /** Installs the global handlers. Calling twice tears the first down. */
 export function init(options: InitOptions): () => void {
   if (typeof window === "undefined") return () => {};
@@ -295,7 +319,7 @@ export function init(options: InitOptions): () => void {
     captureError(event.reason, { kind: "unhandledrejection" });
   };
   const onHidden = () => {
-    if (document.visibilityState === "hidden") flush();
+    if (document.visibilityState === "hidden") drainQueue();
   };
 
   window.addEventListener("error", onError);
@@ -305,7 +329,7 @@ export function init(options: InitOptions): () => void {
   document.addEventListener("visibilitychange", onHidden);
 
   const teardown = () => {
-    flush();
+    drainQueue();
     window.removeEventListener("error", onError);
     window.removeEventListener("unhandledrejection", onRejection);
     document.removeEventListener("visibilitychange", onHidden);

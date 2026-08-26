@@ -36,7 +36,7 @@ One package, six subpath exports and a CLI:
 
 | Import | Contents |
 | --- | --- |
-| `watchfire/browser` | Client SDK: capture, breadcrumbs, batching, repeat suppression. 5 kB minified, 2.3 kB gzipped |
+| `watchfire/browser` | Client SDK: capture, breadcrumbs, batching, repeat suppression, `flush`. 5 kB minified, 2.3 kB gzipped |
 | `watchfire/ingest` | The route handler, a standard `(Request) => Response` function |
 | `watchfire/next` | `withWatchfire`, wraps `next.config` to wire source maps and the release build id |
 | `watchfire/react` | `reportBoundaryError`, for error boundaries |
@@ -104,6 +104,16 @@ init({ endpoint: "/api/errors", release: process.env.NEXT_PUBLIC_RELEASE });
 
 `release` must match the id the maps were stored under in step 1. `withWatchfire` reads the same `NEXT_PUBLIC_RELEASE` variable, so setting one env var at build time covers both. A report with an unknown release is still delivered, but without resolved source positions.
 
+Reports are batched, and the queue is sent when the page is hidden or torn down. If your own code destroys the page, call `flush()` first, or the report explaining why is the one you lose:
+
+```ts
+import { captureError, flush } from "watchfire/browser";
+
+captureError(new Error("StaleBundle: reloading"));
+flush();
+location.reload();
+```
+
 ## Source maps at runtime
 
 Resolution reads maps from local disk, which always matches the release the server is running. This covers errors from browsers on the current bundle.
@@ -143,7 +153,7 @@ Repeat suppression runs in the browser: at most three reports per distinct error
 
 ## Status
 
-v1.1.3. Covered by 151 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
+v1.2.0. Covered by 157 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
 
 Out of scope: a hosted UI and Sentry protocol compatibility, both of which would turn the library into a service.
 
