@@ -143,7 +143,7 @@ Repeat suppression runs in the browser: at most three reports per distinct error
 
 ## Status
 
-v1.1.2. Covered by 150 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
+v1.1.2. Covered by 151 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
 
 Out of scope: a hosted UI and Sentry protocol compatibility, both of which would turn the library into a service.
 

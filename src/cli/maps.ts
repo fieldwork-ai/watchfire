@@ -5,8 +5,9 @@
  *
  *   1. MOVE every `.map` out of the public static directory into a private
  *      directory inside the server output.
- *   2. STRIP the `//# sourceMappingURL=` comment from each chunk, so browsers
- *      stop requesting a file that is no longer served.
+ *   2. STRIP the `sourceMappingURL` comment from each chunk and stylesheet
+ *      (`//#` in JS, `/*#` in CSS), so browsers stop requesting a file that
+ *      is no longer served.
  *   3. VERIFY no `.map` remains anywhere under the public output.
  *
  * Doing this as a post-build file move rather than a bundler plugin is a
@@ -87,7 +88,9 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
 
   const files = await walk(publicDir);
   const maps = files.filter((file) => file.endsWith(".map"));
-  const scripts = files.filter((file) => file.endsWith(".js") || file.endsWith(".mjs"));
+  const chunks = files.filter(
+    (file) => file.endsWith(".js") || file.endsWith(".mjs") || file.endsWith(".css"),
+  );
 
   if (maps.length === 0) {
     log(preset.missingMapsHint);
@@ -113,14 +116,24 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
   let stripped = 0;
   const claimed = new Set<string>();
 
-  for (const script of scripts) {
-    const contents = await readFile(script, "utf8");
-    const pointer = /\/\/# sourceMappingURL=(\S+)\s*$/.exec(contents);
+  for (const chunk of chunks) {
+    // CSS declares its map in a block comment, JS in a line comment. Same
+    // pointer, different clothes; both must be found and both stripped.
+    const css = chunk.endsWith(".css");
+    const pointerRe = css
+      ? /\/\*# sourceMappingURL=(\S+?)\s*\*\/\s*$/
+      : /\/\/# sourceMappingURL=(\S+)\s*$/;
+    const stripRe = css
+      ? /\n?\/\*# sourceMappingURL=\S+?\s*\*\/\s*$/
+      : /\n?\/\/# sourceMappingURL=\S+\s*$/;
+
+    const contents = await readFile(chunk, "utf8");
+    const pointer = pointerRe.exec(contents);
 
     if (pointer?.[1] !== undefined && !pointer[1].startsWith("data:")) {
-      const dir = script.slice(0, script.lastIndexOf("/"));
+      const dir = chunk.slice(0, chunk.lastIndexOf("/"));
       const mapPath = join(dir, pointer[1]);
-      const chunkName = script.split("/").pop();
+      const chunkName = chunk.split("/").pop();
       if (chunkName !== undefined && (await fileExists(mapPath))) {
         await rename(mapPath, join(destination, `${chunkName}.map`));
         claimed.add(mapPath);
@@ -128,11 +141,11 @@ export async function runMaps(options: MapsOptions): Promise<MapsResult> {
       }
     }
 
-    // Strip the pointer. Left in place, every browser requests a map that now
-    // 404s: noise in the access log, and a broken devtools experience.
-    const cleaned = contents.replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, "\n");
+    // Strip the pointer. Left in place, any DevTools session requests a map
+    // that now 404s: noise in the access log, and a broken devtools experience.
+    const cleaned = contents.replace(stripRe, "\n");
     if (cleaned !== contents) {
-      await writeFile(script, cleaned, "utf8");
+      await writeFile(chunk, cleaned, "utf8");
       stripped++;
     }
   }

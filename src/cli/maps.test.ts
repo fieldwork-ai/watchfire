@@ -95,6 +95,30 @@ describe("runMaps", () => {
     expect(main).toContain("console.log(1)");
   });
 
+  it("strips CSS pointers and moves CSS maps out of public serving", async () => {
+    // CSS declares its map in a block comment (/*# ... */), which the strip
+    // pass originally missed: the map moved but the stylesheet kept pointing
+    // at it, so any DevTools session requested a map that 404s.
+    await fakeBuild();
+    const cssDir = join(root, ".next", "static", "css");
+    await mkdir(cssDir, { recursive: true });
+    await writeFile(join(cssDir, "app.css"), "body{color:red}\n/*# sourceMappingURL=app.css.map */");
+    await writeFile(join(cssDir, "app.css.map"), '{"version":3,"sources":["src/app.css"],"mappings":""}');
+
+    const result = await runMaps({ dir: root });
+
+    expect(result.moved).toBe(3);
+    expect(result.stripped).toBe(3);
+    const css = await readFile(join(cssDir, "app.css"), "utf8");
+    expect(css).not.toContain("sourceMappingURL");
+    // The styles themselves must survive the edit.
+    expect(css).toContain("body{color:red}");
+    const stored = await readdir(result.destination);
+    expect(stored).toContain("app.css.map");
+    const leftover = (await walk(join(root, ".next", "static"))).filter((f) => f.endsWith(".map"));
+    expect(leftover).toEqual([]);
+  });
+
   it("uses BUILD_ID as the release when none is given", async () => {
     await fakeBuild({ buildId: "build-xyz789" });
     const result = await runMaps({ dir: root });
