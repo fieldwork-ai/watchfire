@@ -55,6 +55,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
+    "release": "bash scripts/release.sh",
     "prepublishOnly": "npm run build && npm test",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
