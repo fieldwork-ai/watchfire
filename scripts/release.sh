@@ -79,17 +79,30 @@ step "Checking CI passed on this commit"
 # `error.stack` is not standardized: the engine matrix is the whole point of
 # this library's test suite. Re-running it here would be slower and no better
 # than reading the verdict CI already reached on this exact commit.
+#
+# Asked over GraphQL, not the REST checks API. REST costs several calls to
+# answer this and shares a 5000/hour pool with everything else `gh` does, which
+# is easy to exhaust; the GraphQL rollup is one request for one point, against
+# a separate quota. It also answers the question directly instead of making the
+# caller reduce a list of check runs.
 if command -v gh >/dev/null 2>&1; then
-  STATE="$(gh api "repos/{owner}/{repo}/commits/${LOCAL}/check-runs" \
-    --jq '[.check_runs[] | select(.status == "completed") | .conclusion] as $c
-          | if ($c | length) == 0 then "none"
-            elif ($c | map(select(. != "success" and . != "neutral" and . != "skipped")) | length) > 0 then "failing"
-            else "passing" end' 2>/dev/null || echo "unknown")"
+  SLUG="$(git remote get-url origin | sed -E 's#(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+  OWNER="${SLUG%%/*}"
+  NAME="${SLUG##*/}"
+  STATE="$(gh api graphql \
+    -f owner="$OWNER" -f name="$NAME" -f oid="$LOCAL" \
+    -f query='query($owner:String!,$name:String!,$oid:GitObjectID!){
+      repository(owner:$owner,name:$name){
+        object(oid:$oid){ ... on Commit { statusCheckRollup { state } } }
+      }
+    }' \
+    --jq '.data.repository.object.statusCheckRollup.state // "NONE"' 2>/dev/null || echo "UNKNOWN")"
   case "$STATE" in
-    passing) echo "    CI green on ${LOCAL:0:9}" ;;
-    failing) die "CI is not green on ${LOCAL:0:9}." ;;
-    none)    die "CI has not reported on ${LOCAL:0:9} yet. Wait for it." ;;
-    *)       echo "    could not read CI status; falling back to local gates" ;;
+    SUCCESS)                  echo "    CI green on ${LOCAL:0:9}" ;;
+    FAILURE|ERROR)            die "CI is not green on ${LOCAL:0:9}." ;;
+    PENDING|EXPECTED)         die "CI is still running on ${LOCAL:0:9}. Wait for it." ;;
+    NONE)                     die "CI has not reported on ${LOCAL:0:9} yet. Wait for it." ;;
+    *)                        echo "    could not read CI status; falling back to local gates" ;;
   esac
 else
   echo "    gh not installed; falling back to local gates"
