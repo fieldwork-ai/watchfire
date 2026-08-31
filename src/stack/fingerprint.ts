@@ -14,7 +14,7 @@
  * ask for `keep_fnames`; without it the fallback degrades to the message
  * alone, which over-groups but never crashes.
  */
-import type { Frame } from "../types.js";
+import type { Breadcrumb, Frame } from "../types.js";
 
 /**
  * Variable parts of a message, templated out before hashing. Without this,
@@ -77,7 +77,7 @@ function isApplicationFrame(frame: Frame): boolean {
  * callers groups as one issue; the normalized message is what separates the
  * cases that genuinely differ.
  */
-function basisFor(frames: Frame[]): string | null {
+function basisFor(frames: Frame[], breadcrumbs: Breadcrumb[]): string | null {
   const inApp = frames.find(isApplicationFrame);
   if (inApp !== undefined) return `${inApp.file}:${inApp.line}`;
 
@@ -90,11 +90,58 @@ function basisFor(frames: Frame[]): string | null {
   // build keeps them (`keep_fnames`), so this over-groups without it, but it
   // never varies across deploys the way a chunk hash would.
   const named = frames.find((frame) => frame.fn !== null);
-  return named?.fn ?? null;
+  if (named?.fn != null) return named.fn;
+
+  return failedRequestBasis(breadcrumbs);
 }
 
-export function fingerprint(frames: Frame[], message: string, kind: string): string {
-  const basis = basisFor(frames);
+/**
+ * The last resort: the request that was in flight.
+ *
+ * Reached only when the stack yielded NOTHING — no resolved frame and no
+ * function name. Safari produces exactly this for a failed fetch: the message
+ * is `TypeError: Load failed` and there is no stack at all. Grouping then falls
+ * back to the message alone, so every dropped request in the entire
+ * application collapses into one issue. Measured on a production deployment,
+ * that single group held 27 reports from 6 users across 12 releases, spanning
+ * at least four unrelated endpoints.
+ *
+ * The breadcrumb trail still knows which request failed, because the fetch
+ * recorder marks it. On the same deployment all 43 network errors carried a
+ * `failed` fetch as their NEWEST breadcrumb, so this is the request that threw
+ * rather than a guess from nearby traffic.
+ *
+ * The rule is deliberately narrow: the most recent REQUEST, used only if it
+ * failed. A successful request that merely happened to be last says nothing
+ * about an error it did not cause, and stopping at the first request found
+ * means an older failure cannot be attached to an unrelated error later on.
+ *
+ * Non-request breadcrumbs are skipped rather than treated as disqualifying,
+ * because a host that captures `console` records the app's own logging of the
+ * very error being reported, which would otherwise mask the request beneath it.
+ *
+ * Paths are normalized like any message, so record ids in a URL do not split a
+ * group. The trail is client-supplied, but so is every other input to the key.
+ */
+function failedRequestBasis(breadcrumbs: Breadcrumb[]): string | null {
+  // Snapshots are ordered oldest first, so the newest request is the last one.
+  for (let i = breadcrumbs.length - 1; i >= 0; i--) {
+    const crumb = breadcrumbs[i];
+    if (crumb === undefined || crumb.kind !== "fetch") continue;
+    if (crumb.data?.failed !== true) return null;
+    // Marked, so a request path can never collide with a `file:line` basis.
+    return `request!${normalizeMessage(crumb.message)}`;
+  }
+  return null;
+}
+
+export function fingerprint(
+  frames: Frame[],
+  message: string,
+  kind: string,
+  breadcrumbs: Breadcrumb[] = [],
+): string {
+  const basis = basisFor(frames, breadcrumbs);
   const signature =
     basis === null
       ? `${kind}|${normalizeMessage(message)}`

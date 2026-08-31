@@ -133,6 +133,8 @@ void registerMaps({ release, localDir: `${defaultMapsDir()}/${release}`, store: 
 
 The default ignore list contains only errors that are noise in any application: `ResizeObserver loop` notices, cross-origin `Script error` events (which carry no usable information), and errors thrown from browser-extension code, identified by extension URLs in the stack.
 
+Some extension errors arrive with no stack at all, leaving no frame to identify anyone by. A short list of those is matched on the message instead, and the bar for being on it is that the message names an extension API the page cannot reach (`chrome.runtime` errors, and the Firefox pair produced when an extension hands React a privileged event target). A generic `TypeError` is never matched this way.
+
 Chunk-load failures, network errors, and aborted requests are reported, since they're often signal: a chunk-load spike measures how many open tabs a deploy broke, and a network-error spike can indicate an outage. To drop or reroute them, use `ignoreErrors` (substrings or regexes, matched against both message and stack) or classify them in `onEvent`.
 
 ## Privacy defaults
@@ -142,6 +144,14 @@ Chunk-load failures, network errors, and aborted requests are reported, since th
 - Console breadcrumbs: off by default
 - Input values: never captured; there's no option to enable this
 
+## Breadcrumbs
+
+Each report carries a short trail of what happened in the tab beforehand: `fetch` (method, path, status), `click` (a CSS selector), `navigation` (route changes), and `console` if you opt in. `capture.limit` bounds it, default 30.
+
+Eviction is not first-in-first-out. An app that polls makes requests the overwhelming majority of everything recorded, and dropping the oldest entry would discard the rarer clicks and navigations first, which are the ones that say what the person was doing. So when the buffer is full the oldest entry of the *largest* kind is dropped. Request chatter evicts request chatter, and a click from a minute ago outlives a hundred polls.
+
+The trade is worth knowing: the trail is the recent history of each kind in chronological order, not strictly the last N events.
+
 ## Grouping
 
 Every event carries a `fingerprint`; grouping by it gives an issue list. Two properties are enforced by tests:
@@ -149,11 +159,15 @@ Every event carries a `fingerprint`; grouping by it gives an issue list. Two pro
 - **Stable across deploys.** The fingerprint is built from resolved source paths and lines, not generated chunk names, so a rebuild doesn't split an issue. Variable parts of the message (ids, numbers, quoted strings, URLs) are normalized out.
 - **Stable across engines.** Only the top application frame contributes. Engines disagree about deeper framework frames (V8 reports frames JSC elides), which would split one bug into several issues.
 
+When a stack yields nothing at all, grouping falls back to the request that failed. Safari reports a dropped fetch as `TypeError: Load failed` with no stack, so every dropped request in an application would otherwise share one key; the breadcrumb trail still knows which endpoint it was. Only the most recent request counts, and only if it failed.
+
+Watchfire's own frames are removed from the stack before it reaches `onEvent`. Breadcrumb capture patches `window.fetch`, so without this the wrapper is frame 0 of every network error, ahead of the code that made the call.
+
 Repeat suppression runs in the browser: at most three reports per distinct error per page load, with the suppressed count attached to the next flush.
 
 ## Status
 
-v1.2.0. Covered by 157 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
+v1.3.0. Covered by 195 unit tests and 33 end-to-end tests that run Chromium, WebKit, and Firefox against a Next 16 build. Parser fixtures are captured from the engines rather than written by hand; the source map decoder is tested against real bundler output. Watchfire is in production at [Fieldwork](https://getfieldwork.ai).
 
 Out of scope: a hosted UI and Sentry protocol compatibility, both of which would turn the library into a service.
 

@@ -302,6 +302,44 @@ describe("createIngestHandler", () => {
       expect(events).toHaveLength(1);
     });
 
+    it("drops this library's own frames once they resolve", async () => {
+      /**
+       * The wiring for `stripInstrumentationFrames`. It has to run AFTER
+       * resolution, because an unresolved frame is a chunk URL and this
+       * library is bundled into the host's chunks — so a test that never
+       * resolves anything would pass with the strip omitted entirely.
+       *
+       * Two chunks, two maps: one resolving into this package, one into the
+       * host's code, which is the shape every network error arrives in.
+       */
+      const column = MINIFIED.indexOf("throw") + 1;
+      const twoChunks: MapStore = {
+        get: async (_release, file) => {
+          if (file === "own.js.map") {
+            return JSON.stringify({
+              ...SOURCE_MAP,
+              sources: ["node_modules/watchfire/dist/browser/breadcrumbs.js"],
+            });
+          }
+          return file === "a.js.map" ? JSON.stringify(SOURCE_MAP) : null;
+        },
+        put: async () => {},
+        list: async () => [],
+      };
+
+      const { events, handler } = harness({ maps: twoChunks });
+      await handler(post([report({
+        stack:
+          `TypeError: Failed to fetch\n` +
+          `    at window.fetch (https://app.example/_next/static/own.js:1:${column})\n` +
+          `    at r (https://app.example/_next/static/a.js:1:${column})`,
+      })]));
+
+      const files = events[0]?.frames.map((frame) => frame.file) ?? [];
+      expect(files.some((file) => file.includes("watchfire/dist"))).toBe(false);
+      expect(files.some((file) => file.includes("checkout.ts"))).toBe(true);
+    });
+
     it("survives a store that throws", async () => {
       const angry: MapStore = {
         get: async () => { throw new Error("s3 is down"); },
@@ -312,6 +350,36 @@ describe("createIngestHandler", () => {
       const response = await handler(post([report()]));
       expect(response.status).toBe(204);
       expect(events).toHaveLength(1);
+    });
+  });
+
+  describe("breadcrumbs reach the fingerprint", () => {
+    /**
+     * The wiring for the failed-request basis. Grouping is computed in the
+     * handler, so a trail that never arrives there would leave every stackless
+     * network error sharing one key exactly as before.
+     */
+    const stackless = (endpoint: string): RawReport =>
+      report({
+        message: "TypeError: Load failed",
+        stack: null,
+        breadcrumbs: [
+          { kind: "click", ageMs: 900, message: "button#send" },
+          { kind: "fetch", ageMs: 2, message: endpoint, data: { failed: true } },
+        ],
+      });
+
+    it("separates two endpoints that share a message and have no stack", async () => {
+      const { events, handler } = harness();
+      await handler(post([stackless("GET /api/conversations"), stackless("GET /api/connectors")]));
+      expect(events).toHaveLength(2);
+      expect(events[0]?.fingerprint).not.toBe(events[1]?.fingerprint);
+    });
+
+    it("still groups repeats of the same failing endpoint", async () => {
+      const { events, handler } = harness();
+      await handler(post([stackless("GET /api/conversations"), stackless("GET /api/conversations")]));
+      expect(events[0]?.fingerprint).toBe(events[1]?.fingerprint);
     });
   });
 
