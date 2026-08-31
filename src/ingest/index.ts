@@ -13,6 +13,7 @@ import type { Breadcrumb, RawEnvelope, RawReport, WatchfireEvent } from "../type
 import { WIRE_VERSION } from "../types.js";
 import { parseStack } from "../stack/parse.js";
 import { fingerprint } from "../stack/fingerprint.js";
+import { stripInstrumentationFrames } from "../stack/instrumentation.js";
 import { resolveFrames } from "../sourcemaps/resolve.js";
 import type { MapStore } from "../sourcemaps/store.js";
 
@@ -234,12 +235,16 @@ export function createIngestHandler(options: IngestOptions): (request: Request) 
 
         const rawStack = typeof report.stack === "string" ? report.stack.slice(0, MAX_STACK) : null;
         const parsed = parseStack(rawStack);
-        const frames = await resolveFrames(parsed, release, maps);
+        // Resolution has to run first: an unresolved frame is a chunk URL, and
+        // this library's code is bundled into the host's chunks, so its own
+        // frames are only identifiable once they carry an original path.
+        const frames = stripInstrumentationFrames(await resolveFrames(parsed, release, maps));
         const message = report.message.slice(0, MAX_MESSAGE);
+        const breadcrumbs = scrubBreadcrumbs(report.breadcrumbs);
 
         const event: WatchfireEvent = {
           reportId: reportId(),
-          fingerprint: fingerprint(frames, message, report.kind),
+          fingerprint: fingerprint(frames, message, report.kind, breadcrumbs),
           message,
           kind: report.kind.slice(0, 40),
           path: scrubPath(typeof report.path === "string" ? report.path : ""),
@@ -249,7 +254,7 @@ export function createIngestHandler(options: IngestOptions): (request: Request) 
           ...(typeof report.componentStack === "string"
             ? { componentStack: report.componentStack.slice(0, 4000) }
             : {}),
-          breadcrumbs: scrubBreadcrumbs(report.breadcrumbs),
+          breadcrumbs,
           context: scrubContext(report.context),
           suppressed:
             typeof report.suppressed === "number" && report.suppressed > 0

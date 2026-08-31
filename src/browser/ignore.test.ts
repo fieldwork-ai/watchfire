@@ -11,6 +11,13 @@
  *    `chrome-extension://` frame. Matching messages caught almost nothing
  *    while looking like coverage.
  *
+ * Rule 2 has one bounded exception, added after production showed the hole:
+ * some extension errors arrive with NO stack, leaving nothing to identify
+ * anyone by. Those are matched on the message, and only where the message
+ * names an extension API the page cannot reach. The distinction that keeps
+ * this from collapsing back into the mistake rule 2 describes is whether the
+ * message could have been produced by the host's own code.
+ *
  * Exercised through the public API rather than by exporting internals: the
  * question is whether a report leaves, and the transport is where that shows.
  */
@@ -156,6 +163,62 @@ describe("foreign sources are matched on the stack", () => {
   it("keeps an error with no stack at all", () => {
     // Nothing to match against is not grounds for discarding a report.
     captureError(errorWith("TypeError: something went wrong", null));
+    flush();
+    expect(reported()).toHaveLength(1);
+  });
+});
+
+describe("stackless extension errors are matched on the message", () => {
+  /**
+   * The hole rule 2 leaves. Each of these was observed in production, stored
+   * as though it were an application bug, with zero frames and zero
+   * breadcrumbs: there was no stack for `FOREIGN_SOURCES` to match.
+   */
+  // Bare messages: the SDK reports `${error.name}: ${error.message}`, so these
+  // reach the filter with the `Error: ` prefix the patterns allow for.
+  it.each([
+    "Invalid call to runtime.sendMessage(). Tab not found.",
+    "Extension context invalidated.",
+    "The message port closed before a response was received.",
+    "Could not establish connection. Receiving end does not exist.",
+    'Permission denied to access property "correspondingUseElement"',
+    'Permission denied to access property "__reactFiber$5msldsq0nrn"',
+  ])("drops %s", (message) => {
+    captureError(errorWith(message, null));
+    flush();
+    expect(reported()).toEqual([]);
+  });
+
+  it("drops the Firefox pair when they arrive with a React-only stack", () => {
+    // The shape actually seen: an extension hands React a privileged object,
+    // so every frame belongs to react-dom and none to the extension.
+    captureError(
+      errorWith(
+        'Permission denied to access property "correspondingUseElement"',
+        "Error: x\n    at https://app.example/_next/static/chunks/react.js:1:2",
+      ),
+    );
+    flush();
+    expect(reported()).toEqual([]);
+  });
+
+  it("keeps a permission error naming any other property", () => {
+    // The anchor is the property React's event system touches, not the words
+    // "Permission denied" — anything else may be a real cross-origin bug.
+    captureError(errorWith('Permission denied to access property "contentWindow"', null));
+    flush();
+    expect(reported()).toHaveLength(1);
+  });
+
+  it("keeps an application error that merely mentions an extension API", () => {
+    // Matched on the message, so the stack must not be a haystack: a frame in
+    // the host's own code could otherwise suppress a genuine report.
+    captureError(
+      errorWith(
+        "TypeError: handler is not a function",
+        "TypeError: x\n    at sendMessage (https://app.example/_next/static/chunks/runtime.sendMessage.js:1:2)",
+      ),
+    );
     flush();
     expect(reported()).toHaveLength(1);
   });

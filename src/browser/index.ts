@@ -83,6 +83,39 @@ const DEFAULT_IGNORE: RegExp[] = [
  */
 const FOREIGN_SOURCES = /(?:chrome|moz|safari|ms-browser)-extension:\/\//i;
 
+/**
+ * Extension errors that arrive with no usable stack, matched by message.
+ *
+ * This is the exception to the rule stated above `FOREIGN_SOURCES`, and it
+ * exists because that rule has a hole: an extension error can reach the page
+ * with NO stack at all, and there is then no frame to identify anyone by. Both
+ * shapes below were seen in production and stored as though they were
+ * application bugs.
+ *
+ * The bar for adding to this list is that the message NAMES a browser
+ * extension API, so page code cannot produce it. `runtime.sendMessage` and the
+ * message-port errors come from `chrome.runtime`, which is not exposed to the
+ * page. That is what makes them safe to match on where a generic
+ * `TypeError: Cannot read properties of null` is not — matching those on the
+ * message is exactly the over-reach the comment above warns about.
+ *
+ * The Firefox pair is the same failure in a different disguise: an extension
+ * hands React a privileged object, React's delegated event handler inspects the
+ * property it always inspects, and Firefox refuses. The stack contains only
+ * React frames, so `FOREIGN_SOURCES` cannot see it. They are anchored to the
+ * two exact property names React's event system touches rather than to
+ * "Permission denied", because a denied access to anything else may well be a
+ * real cross-origin bug in the host's own code.
+ */
+const FOREIGN_MESSAGES: RegExp[] = [
+  /Invalid call to runtime\.sendMessage\(\)/,
+  /Extension context invalidated/,
+  /The message port closed before a response was received/,
+  /Could not establish connection\. Receiving end does not exist/,
+  /^(?:Error: )?Permission denied to access property "correspondingUseElement"$/,
+  /^(?:Error: )?Permission denied to access property "__react(?:Fiber|InternalInstance)\$[^"]+"$/,
+];
+
 interface State {
   options: Required<Omit<InitOptions, "capture" | "ignoreErrors" | "release" | "context">> & {
     release: string | null;
@@ -124,6 +157,14 @@ function shouldIgnore(
   patterns: (string | RegExp)[],
 ): boolean {
   if (stack !== null && FOREIGN_SOURCES.test(stack)) return true;
+
+  // Message only, and only for these: the patterns name an extension API, so
+  // the identifying detail is the message itself. Testing them against the
+  // stack as well would let an application frame that merely quotes one of
+  // these strings suppress a real error.
+  for (const pattern of FOREIGN_MESSAGES) {
+    if (pattern.test(message)) return true;
+  }
 
   // Host patterns are tested against the stack too: a host filtering a
   // third-party widget has the same problem extensions do, in that the

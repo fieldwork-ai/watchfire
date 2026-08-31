@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fingerprint, normalizeMessage } from "./fingerprint.js";
 import { parseStack } from "./parse.js";
 import { ENGINE_STACKS } from "./fixtures.js";
-import type { Frame } from "../types.js";
+import type { Breadcrumb, Frame } from "../types.js";
 
 const frame = (over: Partial<Frame> = {}): Frame => ({
   fn: "handleSubmit",
@@ -118,6 +118,91 @@ describe("fingerprint", () => {
   it("falls back to the message alone with no usable frames", () => {
     expect(fingerprint([], "boom", "error")).toHaveLength(16);
     expect(fingerprint([], "boom", "error")).not.toBe(fingerprint([], "bang", "error"));
+  });
+
+  describe("the failed request as a last resort", () => {
+    /**
+     * Safari reports a dropped fetch as `TypeError: Load failed` with NO stack
+     * at all, so every such error in an application used to share one key. On
+     * the deployment this was written against that single group held 27
+     * reports from 6 users across 12 releases, spanning at least four
+     * unrelated endpoints. The breadcrumb trail still knew which request had
+     * failed.
+     */
+    const failed = (message: string): Breadcrumb[] => [
+      { kind: "click", ageMs: 900, message: "button#send" },
+      { kind: "fetch", ageMs: 2, message, data: { failed: true } },
+    ];
+
+    it("separates two endpoints that would otherwise be one issue", () => {
+      const conversations = fingerprint([], "TypeError: Load failed", "error", failed("GET /api/conversations"));
+      const connectors = fingerprint([], "TypeError: Load failed", "error", failed("GET /api/connectors"));
+      expect(conversations).not.toBe(connectors);
+    });
+
+    it("groups the same endpoint across record ids", () => {
+      const a = failed("GET /api/conversations/8f3a1b2c-1111-2222-3333-444455556666");
+      const b = failed("GET /api/conversations/22bcdead-9999-8888-7777-666655554444");
+      expect(fingerprint([], "TypeError: Load failed", "error", a)).toBe(
+        fingerprint([], "TypeError: Load failed", "error", b),
+      );
+    });
+
+    it("ignores a request that succeeded", () => {
+      // A successful request that merely happened to be last says nothing
+      // about an error it did not cause.
+      const succeeded: Breadcrumb[] = [
+        { kind: "fetch", ageMs: 2, message: "GET /api/conversations", data: { status: 200 } },
+      ];
+      expect(fingerprint([], "TypeError: Load failed", "error", succeeded)).toBe(
+        fingerprint([], "TypeError: Load failed", "error", []),
+      );
+    });
+
+    it("uses the most recent request, not an older failure", () => {
+      const trail: Breadcrumb[] = [
+        { kind: "fetch", ageMs: 9000, message: "GET /api/old", data: { failed: true } },
+        { kind: "fetch", ageMs: 2, message: "GET /api/new", data: { status: 200 } },
+      ];
+      // The newest request succeeded, so nothing is attributed at all.
+      expect(fingerprint([], "TypeError: Load failed", "error", trail)).toBe(
+        fingerprint([], "TypeError: Load failed", "error", []),
+      );
+    });
+
+    it("looks past the app logging its own error", () => {
+      // A host capturing `console` records the error being reported, which
+      // would otherwise mask the request underneath it.
+      const trail: Breadcrumb[] = [
+        { kind: "fetch", ageMs: 5, message: "GET /api/conversations", data: { failed: true } },
+        { kind: "console", ageMs: 0, message: "request failed", data: { level: "error" } },
+      ];
+      expect(fingerprint([], "TypeError: Load failed", "error", trail)).toBe(
+        fingerprint([], "TypeError: Load failed", "error", failed("GET /api/conversations")),
+      );
+    });
+
+    it("never displaces a stack that resolved", () => {
+      // The whole point is that this is a LAST resort. An error with real
+      // frames must key on them however rich the trail is.
+      const withTrail = fingerprint([frame()], "boom", "error", failed("GET /api/conversations"));
+      expect(withTrail).toBe(fingerprint([frame()], "boom", "error"));
+    });
+
+    it("never displaces a function-name fallback", () => {
+      const unresolved = [frame({ resolved: false, file: "chunk-4f2a.js" })];
+      expect(fingerprint(unresolved, "boom", "error", failed("GET /api/x"))).toBe(
+        fingerprint(unresolved, "boom", "error"),
+      );
+    });
+
+    it("cannot collide with a file:line basis", () => {
+      // A request path and a source path are both just strings; the basis is
+      // marked so one can never be mistaken for the other.
+      const asRequest = fingerprint([], "boom", "error", failed("src/checkout.ts:214"));
+      const asFrame = fingerprint([frame()], "boom", "error");
+      expect(asRequest).not.toBe(asFrame);
+    });
   });
 
   it("produces one key for one bug across all three engines", () => {
