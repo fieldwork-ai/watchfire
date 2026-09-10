@@ -2,7 +2,7 @@
   "name": "watchfire",
   "version": "1.3.0",
   "description": "Self-hosted error tracking for Next.js. A library, not a service.",
-  "license": "MIT",
+  "license": "(MIT OR Apache-2.0)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fieldwork-ai/watchfire.git"
@@ -51,7 +51,9 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
