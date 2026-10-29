@@ -116,6 +116,30 @@ const FOREIGN_MESSAGES: RegExp[] = [
   /^(?:Error: )?Permission denied to access property "__react(?:Fiber|InternalInstance)\$[^"]+"$/,
 ];
 
+/**
+ * The native bridge Meta's in-app browser injects into every page.
+ *
+ * Facebook, Instagram and Messenger on iOS add a script to each page that
+ * reports page events to the app through `window.webkit.messageHandlers`. On
+ * `pagehide` the bridge can already be gone, and the script throws
+ * `undefined is not an object (evaluating 'window.webkit.messageHandlers')`.
+ * WebKit attributes an injected script's frames to the page's own URL, so
+ * `FOREIGN_SOURCES` has nothing to see; the function names are the only mark.
+ *
+ * Neither half is enough alone. The frame name could be the host's own
+ * function, and inside Meta's browser the host's code throws as it does
+ * anywhere. So a report is dropped only when the user agent is Meta's in-app
+ * browser AND the innermost frame is the bridge's.
+ */
+const META_IN_APP_BROWSER = /\b(?:FBAN|FBAV|Instagram)\b/;
+const META_BRIDGE_FRAME = /^sendDataToNative@/;
+
+function isMetaBridgeError(stack: string | null): boolean {
+  if (stack === null || !META_IN_APP_BROWSER.test(navigator.userAgent)) return false;
+  const innermost = stack.split("\n").find((line) => line.trim() !== "")?.trim() ?? "";
+  return META_BRIDGE_FRAME.test(innermost);
+}
+
 interface State {
   options: Required<Omit<InitOptions, "capture" | "ignoreErrors" | "release" | "context">> & {
     release: string | null;
@@ -157,6 +181,7 @@ function shouldIgnore(
   patterns: (string | RegExp)[],
 ): boolean {
   if (stack !== null && FOREIGN_SOURCES.test(stack)) return true;
+  if (isMetaBridgeError(stack)) return true;
 
   // Message only, and only for these: the patterns name an extension API, so
   // the identifying detail is the message itself. Testing them against the

@@ -135,6 +135,8 @@ The default ignore list contains only errors that are noise in any application: 
 
 Some extension errors arrive with no stack at all, leaving no frame to identify anyone by. A short list of those is matched on the message instead, and the bar for being on it is that the message names an extension API the page cannot reach (`chrome.runtime` errors, and the Firefox pair produced when an extension hands React a privileged event target). A generic `TypeError` is never matched this way.
 
+Meta's in-app browser (Facebook, Instagram and Messenger on iOS) injects a native bridge into every page, which throws on `pagehide` once the app has torn it down. WebKit attributes its frames to the page's own URL, so it is dropped only when both the user agent is Meta's in-app browser and the innermost frame is the bridge's `sendDataToNative`.
+
 Chunk-load failures, network errors, and aborted requests are reported, since they're often signal: a chunk-load spike measures how many open tabs a deploy broke, and a network-error spike can indicate an outage. To drop or reroute them, use `ignoreErrors` (substrings or regexes, matched against both message and stack) or classify them in `onEvent`.
 
 ## Privacy defaults

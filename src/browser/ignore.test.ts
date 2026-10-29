@@ -224,6 +224,57 @@ describe("stackless extension errors are matched on the message", () => {
   });
 });
 
+describe("Meta's in-app browser bridge", () => {
+  /**
+   * Observed in production from the Facebook app on iOS: WebKit attributes the
+   * injected bridge's frames to the page's own URL, so only the function names
+   * and the user agent identify it.
+   */
+  const FACEBOOK_IOS =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 26_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+    "Mobile/23D127 Safari/604.1 [FBAN/FBIOS;FBAV/565.0.0.61.71;FBDV/iPhone15,4;FBMD/iPhone;FBSN/iOS]";
+  const INSTAGRAM_IOS =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 26_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+    "Mobile/23D127 Instagram 400.0.0.27.110 (iPhone15,4; iOS 26_3; en_US)";
+  const BRIDGE_STACK =
+    "sendDataToNative@https://app.example/book/30min:1:1325\n" +
+    "sendPageHideMessage@https://app.example/book/30min:1:4139\n" +
+    "@https://app.example/book/30min:1:6257";
+  const MESSAGE = "TypeError: undefined is not an object (evaluating 'window.webkit.messageHandlers')";
+
+  function asUserAgent(userAgent: string): void {
+    vi.stubGlobal("navigator", { ...navigator, userAgent });
+  }
+
+  it.each([FACEBOOK_IOS, INSTAGRAM_IOS])("drops the bridge's pagehide error in %s", (userAgent) => {
+    asUserAgent(userAgent);
+    captureError(errorWith(MESSAGE, BRIDGE_STACK));
+    flush();
+    expect(reported()).toEqual([]);
+  });
+
+  it("keeps a host function of the same name outside Meta's browser", () => {
+    // The frame name alone could be the host's own code.
+    captureError(errorWith(MESSAGE, BRIDGE_STACK));
+    flush();
+    expect(reported()).toHaveLength(1);
+  });
+
+  it("keeps the host's own errors inside Meta's browser", () => {
+    // The user agent alone would silence every report from those users.
+    asUserAgent(FACEBOOK_IOS);
+    captureError(
+      errorWith(
+        "TypeError: undefined is not an object (evaluating 'slots.length')",
+        "renderSlots@https://app.example/_next/static/chunks/a.js:1:2\n" +
+          "sendDataToNative@https://app.example/book/30min:1:1325",
+      ),
+    );
+    flush();
+    expect(reported()).toHaveLength(1);
+  });
+});
+
 describe("host patterns", () => {
   it("are matched against the stack as well as the message", () => {
     teardown();
